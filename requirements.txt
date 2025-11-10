@@ -18,3 +18,4 @@ databases
 python-dotenv
 apscheduler
 packaging
+redis>=4.2.0rc1

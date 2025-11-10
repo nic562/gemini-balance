@@ -16,6 +16,7 @@ from app.log.logger import get_files_logger
 from app.utils.helpers import redact_key_for_logging
 from app.service.client.api_client import GeminiApiClient
 from app.service.key.key_manager import get_key_manager_instance
+from app.database.redis_connection import get_redis_client
 
 logger = get_files_logger()
 
@@ -45,7 +46,8 @@ class FilesService:
         headers: Dict[str, str], 
         body: Optional[bytes],
         user_token: str,
-        request_host: str = None  # 添加請求主機參數
+        request_host: str = None,  # 添加請求主機參數
+        session_id: Optional[str] = None
     ) -> Tuple[Dict[str, Any], Dict[str, str]]:
         """
         初始化文件上传
@@ -54,14 +56,15 @@ class FilesService:
             headers: 请求头
             body: 请求体
             user_token: 用户令牌
+            request_host: 请求主機
+            session_id: 上传會話ID，可选，用于关联多个文件上传到同一个api-key
             
         Returns:
             Tuple[Dict[str, Any], Dict[str, str]]: (响应体, 响应头)
         """
         try:
             # 获取可用的 API key
-            key_manager = await self._get_key_manager()
-            api_key = await key_manager.get_next_key()
+            api_key = await self._get_api_key_for_session(session_id)
             
             if not api_key:
                 raise HTTPException(status_code=503, detail="No available API keys")
@@ -178,7 +181,35 @@ class FilesService:
         except Exception as e:
             logger.error(f"Failed to initialize upload: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
-    
+
+    async def _get_api_key_for_session(self, session_id: Optional[str]) -> Optional[str]:
+        """Get API key for a given session ID, from Redis or new from key manager."""
+        if not session_id:
+            key_manager = await self._get_key_manager()
+            return await key_manager.get_next_key()
+
+        redis = await get_redis_client()
+        if not redis:
+            key_manager = await self._get_key_manager()
+            return await key_manager.get_next_key()
+
+        key = f"upload_session:{session_id}"
+        api_key = await redis.get(key)
+
+        if api_key:
+            logger.info(f"Reusing API key for session {session_id}")
+            return api_key
+
+        logger.info(f"No cached API key for session {session_id}, getting a new one.")
+        key_manager = await self._get_key_manager()
+        new_api_key = await key_manager.get_next_key()
+
+        if new_api_key:
+            await redis.set(key, new_api_key, ex=900)  # 15 minutes expiration
+            logger.info(f"Cached new API key for session {session_id}")
+
+        return new_api_key
+
     async def _cleanup_expired_sessions(self):
         """清理過期的上傳會話"""
         try:

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     MYSQL_DATABASE: str = ""
     MYSQL_SOCKET: str = ""
 
+    # Redis 配置
+    REDIS_URL: str = "redis://redis:6379/0"
+
     # 验证 MySQL 配置
     @field_validator(
         "MYSQL_HOST", "MYSQL_PORT", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DATABASE"

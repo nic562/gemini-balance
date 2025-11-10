@@ -7,6 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config.config import settings, sync_initial_settings
 from app.database.connection import connect_to_db, disconnect_from_db
+from app.database.redis_connection import connect_to_redis, disconnect_from_redis
 from app.database.initialization import initialize_database
 from app.exception.exceptions import setup_exception_handlers
 from app.log.logger import get_application_logger, setup_access_logging
@@ -42,6 +43,7 @@ async def _setup_database_and_config(app_settings):
     initialize_database()
     logger.info("Database initialized successfully")
     await connect_to_db()
+    await connect_to_redis()
     await sync_initial_settings()
     await get_key_manager_instance(app_settings.API_KEYS, app_settings.VERTEX_API_KEYS)
     logger.info("Database, config sync, and KeyManager initialized successfully")
@@ -50,6 +52,7 @@ async def _setup_database_and_config(app_settings):
 async def _shutdown_database():
     """Disconnects from the database."""
     await disconnect_from_db()
+    await disconnect_from_redis()
 
 
 def _start_scheduler():

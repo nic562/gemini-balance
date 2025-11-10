@@ -31,6 +31,7 @@ async def upload_file_init(
     x_goog_upload_command: Optional[str] = Header(None),
     x_goog_upload_header_content_length: Optional[str] = Header(None),
     x_goog_upload_header_content_type: Optional[str] = Header(None),
+    x_upload_session_id: Optional[str] = Header(None, alias="X-Upload-Session-Id"),
 ):
     """初始化文件上传"""
     logger.debug(f"Upload file request: {request.method=}, {request.url=}, {auth_token=}, {x_goog_upload_protocol=}, {x_goog_upload_command=}, {x_goog_upload_header_content_length=}, {x_goog_upload_header_content_type=}")
@@ -72,7 +73,8 @@ async def upload_file_init(
             headers=headers,
             body=body,
             user_token=user_token,
-            request_host=request_host  # 傳遞請求主機
+            request_host=request_host,  # 傳遞請求主機
+            session_id=x_upload_session_id
         )
 
         logger.info(f"Upload initialization response: {response_data}")
