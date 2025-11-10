@@ -34,7 +34,7 @@ async def upload_file_init(
     x_upload_session_id: Optional[str] = Header(None, alias="X-Upload-Session-Id"),
 ):
     """初始化文件上传"""
-    logger.debug(f"Upload file request: {request.method=}, {request.url=}, {auth_token=}, {x_goog_upload_protocol=}, {x_goog_upload_command=}, {x_goog_upload_header_content_length=}, {x_goog_upload_header_content_type=}")
+    logger.debug(f"Upload file request: {request.method=}, {request.url=}, {auth_token=}, {x_goog_upload_protocol=}, {x_goog_upload_command=}, {x_goog_upload_header_content_length=}, {x_goog_upload_header_content_type=}, {x_upload_session_id=}")
     
     # 檢查是否是實際的上傳請求（有 upload_id）
     if request.query_params.get("upload_id") and x_goog_upload_command in ["upload", "upload, finalize"]:
