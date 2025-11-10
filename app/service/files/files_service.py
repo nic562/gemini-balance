@@ -4,6 +4,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, Tuple
+import urllib.parse
 from httpx import AsyncClient
 import asyncio
 
@@ -19,10 +20,6 @@ from app.service.key.key_manager import get_key_manager_instance
 from app.database.redis_connection import get_redis_client
 
 logger = get_files_logger()
-
-# 全局上傳會話存儲
-_upload_sessions: Dict[str, Dict[str, Any]] = {}
-_upload_sessions_lock = asyncio.Lock()
 
 
 class FilesService:
@@ -120,30 +117,30 @@ class FilesService:
                     except Exception:
                         pass
                 # 從 upload URL 中提取 upload_id
-                import urllib.parse
                 parsed_url = urllib.parse.urlparse(upload_url)
                 query_params = urllib.parse.parse_qs(parsed_url.query)
                 upload_id = query_params.get('upload_id', [None])[0]
                 
                 if upload_id:
-                    # 儲存上傳會話信息，使用 upload_id 作為 key
-                    async with _upload_sessions_lock:
-                        _upload_sessions[upload_id] = {
+                    # 儲存上傳會話信息到 Redis
+                    redis = await get_redis_client()
+                    if redis:
+                        session_data = {
                             "api_key": api_key,
                             "user_token": user_token,
                             "display_name": display_name,
                             "mime_type": headers.get("x-goog-upload-header-content-type", "application/octet-stream"),
                             "size_bytes": int(headers.get("x-goog-upload-header-content-length", "0")),
-                            "created_at": datetime.now(timezone.utc),
+                            "created_at": datetime.now(timezone.utc).isoformat(),
                             "upload_url": upload_url
                         }
-                        logger.info(f"Stored upload session for upload_id={upload_id}: api_key={redact_key_for_logging(api_key)}")
-                        logger.debug(f"Total active sessions: {len(_upload_sessions)}")
+                        session_key = f"upload_file_session:{upload_id}"
+                        await redis.set(session_key, json.dumps(session_data), ex=3600)  # 1 hour expiration
+                        logger.info(f"Stored upload session in Redis for upload_id={upload_id}")
+                    else:
+                        logger.error("Redis client is not available, failed to store upload session.")
                 else:
                     logger.warning(f"No upload_id found in upload URL: {upload_url}")
-                
-                # 定期清理過期的會話（超過1小時）
-                asyncio.create_task(self._cleanup_expired_sessions())
                 
                 # 替換 Google 的 URL 為我們的代理 URL
                 proxy_upload_url = upload_url
@@ -209,48 +206,31 @@ class FilesService:
             logger.info(f"Cached new API key for session {session_id}")
 
         return new_api_key
-
-    async def _cleanup_expired_sessions(self):
-        """清理過期的上傳會話"""
-        try:
-            async with _upload_sessions_lock:
-                now = datetime.now(timezone.utc)
-                expired_keys = []
-                for key, session in _upload_sessions.items():
-                    if now - session["created_at"] > timedelta(hours=1):
-                        expired_keys.append(key)
-                
-                for key in expired_keys:
-                    del _upload_sessions[key]
-                    
-                if expired_keys:
-                    logger.info(f"Cleaned up {len(expired_keys)} expired upload sessions")
-        except Exception as e:
-            logger.error(f"Error cleaning up upload sessions: {str(e)}")
     
     async def get_upload_session(self, key: str) -> Optional[Dict[str, Any]]:
-        """獲取上傳會話信息（支持 upload_id 或完整 URL）"""
-        async with _upload_sessions_lock:
-            # 先嘗試直接查找
-            session = _upload_sessions.get(key)
-            if session:
-                logger.debug(f"Found session by direct key {redact_key_for_logging(key)}")
-                return session
-            
-            # 如果是 URL，嘗試提取 upload_id
-            if key.startswith("http"):
-                import urllib.parse
+        """从 Redis 获取上传会话"""
+        redis = await get_redis_client()
+        if not redis:
+            logger.error("Redis client is not available, cannot get upload session.")
+            return None
+        
+        if key.startswith("http"):
+            try:
                 parsed_url = urllib.parse.urlparse(key)
                 query_params = urllib.parse.parse_qs(parsed_url.query)
                 upload_id = query_params.get('upload_id', [None])[0]
-                if upload_id:
-                    session = _upload_sessions.get(upload_id)
-                    if session:
-                        logger.debug(f"Found session by upload_id {upload_id} from URL")
-                        return session
-            
-            logger.debug(f"No session found for key: {redact_key_for_logging(key)}")
-            return None
+            except Exception as e:
+                logger.warning(f"Error parsing upload URL to find session: {e}")
+                return None
+        else:
+            upload_id = key
+        
+        session_key = f"upload_file_session:{upload_id}"
+        session_data = await redis.get(session_key)
+        
+        if session_data:
+            return json.loads(session_data)
+        return None
     
     async def get_file(self, file_name: str, user_token: str) -> FileMetadata:
         """
