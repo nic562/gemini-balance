@@ -442,6 +442,8 @@ class GeminiChatService:
     ) -> AsyncGenerator[str, None]:
         """流式生成内容"""
         # 檢查並獲取文件專用的 API key（如果有文件）
+        # 是否固定使用文件的 API key
+        is_fixed = False
         file_names = _extract_file_references(request.model_dump().get("contents", []))
         if file_names:
             logger.info(f"Request contains file references: {file_names}")
@@ -451,13 +453,14 @@ class GeminiChatService:
                     f"Found API key for file {file_names[0]}: {redact_key_for_logging(file_api_key)}"
                 )
                 api_key = file_api_key  # 使用文件的 API key
+                is_fixed = True
             else:
                 logger.warning(
                     f"No API key found for file {file_names[0]}, using default key: {redact_key_for_logging(api_key)}"
                 )
 
         retries = 0
-        max_retries = settings.MAX_RETRIES
+        max_retries = 1 if is_fixed else settings.MAX_RETRIES  # 如果固定使用文件的 API key，則只嘗試一次
         payload = _build_payload(model, request)
         is_success = False
         status_code = None
