@@ -36,12 +36,12 @@ def _extract_file_references(contents: List[Dict[str, Any]]) -> List[str]:
     for content in contents:
         if "parts" in content:
             for part in content["parts"]:
-                if not isinstance(part, dict) or "fileData" not in part:
+                if not isinstance(part, dict) or ("fileData" not in part and "file_data" not in part):
                     continue
-                file_data = part["fileData"]
-                if "fileUri" not in file_data:
+                file_data = part.get("fileData") or part.get("file_data")
+                if "fileUri" not in file_data and "file_uri" not in file_data:
                     continue
-                file_uri = file_data["fileUri"]
+                file_uri = file_data.get("fileUri") or file_data.get("file_uri")
                 # 從 URI 中提取文件名
                 # 1. https://generativelanguage.googleapis.com/v1beta/files/{file_id}
                 match = re.match(
